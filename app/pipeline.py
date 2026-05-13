@@ -13,36 +13,28 @@ from pathlib import Path
 
 import pymupdf
 
-from .classifier import apply_classification, build_flags, PresetStore
+from .classifier import apply_classification, build_flags, PresetStore, classify_span, compile_patterns
 from .extractor import extract_text, save_sidecar
 from .outliner import outline_text
 from .reinsert import reinsert_text, verify_roundtrip
 
 
 def render_pages(pdf_path: str | Path, out_dir: str | Path, scale: float = 2.0) -> list[Path]:
-    """Rasterise every page of *pdf_path* as PNG into *out_dir*.
-
-    Returns list of PNG paths in page order.
-    """
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     doc = pymupdf.open(str(pdf_path))
     matrix = pymupdf.Matrix(scale, scale)
     paths: list[Path] = []
-
     for i in range(len(doc)):
-        page = doc[i]
-        pix = page.get_pixmap(matrix=matrix, alpha=False)
+        pix = doc[i].get_pixmap(matrix=matrix, alpha=False)
         dest = out_dir / f"page_{i:04d}.png"
         pix.save(str(dest))
         paths.append(dest)
-
     doc.close()
     return paths
 
 
 def render_thumbnails(pdf_path: str | Path, out_dir: str | Path, scale: float = 0.25) -> list[Path]:
-    """Render small thumbnails for the sidebar strip."""
     return render_pages(pdf_path, out_dir, scale=scale)
 
 
@@ -60,12 +52,12 @@ def run_headless(
 ) -> dict:
     """Full pipeline without UI.
 
-    Priority for what gets kept:
-    1. *selection_json* (overrides dict) if supplied
-    2. Regex patterns (from *patterns* or *preset_name*)
-    3. Keep everything if neither provided
+    Spans matching *patterns* are kept; non-matching are dropped.
+    If no patterns given, everything is kept.
+    *selection_json* is a flat ``{span_id: "keep"|"delete"}`` dict that
+    overrides pattern results.
 
-    Returns a summary dict with keys: ``kept``, ``deleted``, ``issues``.
+    Returns a summary dict: ``kept``, ``deleted``, ``total``, ``issues``.
     """
     input_pdf = Path(input_pdf)
     output_pdf = Path(output_pdf)
@@ -79,18 +71,14 @@ def run_headless(
         work_dir = Path(work_dir)
         work_dir.mkdir(parents=True, exist_ok=True)
 
-    # ── 1. Extract ─────────────────────────────────────────────────────────────
     print(f"[pipeline] Extracting text from {input_pdf.name} …")
     pages_data = extract_text(input_pdf)
     save_sidecar(pages_data, work_dir / "spans.json")
 
-    # ── 2. Outline ─────────────────────────────────────────────────────────────
     outlined = work_dir / "outlined.pdf"
     print("[pipeline] Flattening text to outlines via Ghostscript …")
     outline_text(input_pdf, outlined)
 
-    # ── 3. Classify ────────────────────────────────────────────────────────────
-    # Resolve patterns from preset if needed
     if preset_name and not patterns:
         store = PresetStore(preset_dir or Path.home() / ".pdfsan" / "presets")
         preset = store.get(preset_name)
@@ -103,28 +91,26 @@ def run_headless(
             )
             granularity = preset.get("granularity", "span")
 
-    if patterns:
-        print(f"[pipeline] Classifying with {len(patterns)} pattern(s) …")
-        auto_cls = apply_classification(pages_data, patterns, flags, granularity)
-    else:
-        # Keep everything
-        auto_cls = {
-            pid: {s["id"]: "keep" for s in page["spans"]}
-            for pid, page in pages_data.items()
-        }
+    # Build flat state dict — default "delete"
+    compiled = compile_patterns(patterns or [], flags)
+    state: dict[str, str] = {}
+    for pid, page in pages_data.items():
+        for span in page["spans"]:
+            sid = span["id"]
+            if patterns:
+                state[sid] = classify_span(span, compiled, granularity)
+            else:
+                state[sid] = "keep"
 
-    # Load manual overrides from selection JSON if supplied
-    overrides: dict[str, str] = {}
     if selection_json:
         overrides = json.loads(Path(selection_json).read_text(encoding="utf-8"))
+        state.update(overrides)
 
-    # ── 4. Reinsert ────────────────────────────────────────────────────────────
     print("[pipeline] Reinserting kept spans as invisible text …")
-    inserted = reinsert_text(outlined, pages_data, auto_cls, overrides, {}, output_pdf)
+    inserted = reinsert_text(outlined, pages_data, state, {}, {}, output_pdf)
 
-    # ── 5. Count + verify ──────────────────────────────────────────────────────
-    kept = sum(len(v) for v in inserted.values())
-    total = sum(len(p["spans"]) for p in pages_data.values())
+    kept    = sum(len(v) for v in inserted.values())
+    total   = sum(len(p["spans"]) for p in pages_data.values())
     deleted = total - kept
 
     issues: list[str] = []

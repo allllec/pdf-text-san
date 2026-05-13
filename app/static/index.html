@@ -7,117 +7,118 @@
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
-<div id="app">
+
+<!-- ══════════════════════════════════════════════════════════════════════════ -->
+<!--  HOME SCREEN                                                              -->
+<!-- ══════════════════════════════════════════════════════════════════════════ -->
+<div id="home-screen">
+  <div id="home-inner">
+    <h1 class="home-title">PDF·SAN</h1>
+    <p class="home-sub">Selective text rebuild tool</p>
+
+    <!-- Drop zone -->
+    <div class="drop-zone" id="drop-zone">
+      <div class="drop-icon">⬆</div>
+      <p class="drop-label">Drop a PDF here, or click to browse</p>
+      <input type="file" id="file-input" accept=".pdf" style="display:none">
+    </div>
+
+    <!-- In-progress sessions -->
+    <div id="session-list-wrap" style="display:none">
+      <h2 class="section-title">In-progress sessions</h2>
+      <div id="session-list"></div>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════════════════════ -->
+<!--  EDITOR SCREEN                                                            -->
+<!-- ══════════════════════════════════════════════════════════════════════════ -->
+<div id="editor-screen" class="hidden">
 
   <!-- ── Toolbar ──────────────────────────────────────────────────────────── -->
   <div id="toolbar">
-    <span class="logo">PDF·SAN</span>
+    <button class="tb-btn" id="btn-back" data-tip="Back to home">← Back</button>
+    <span id="doc-title" class="doc-title"></span>
     <div class="sep"></div>
 
-    <!-- Regex input -->
-    <input id="regex-input" type="text" placeholder="regex pattern…" spellcheck="false" autocomplete="off" data-tip="Enter regex; Ctrl+Enter to apply">
-
-    <!-- Regex flags -->
+    <!-- Regex -->
+    <input id="regex-input" type="text" class="regex-input" placeholder="regex pattern…" spellcheck="false" autocomplete="off">
     <div class="flag-group">
-      <button class="flag-btn" id="flag-i" data-tip="Case-insensitive">i</button>
-      <button class="flag-btn" id="flag-m" data-tip="Multiline">m</button>
-      <button class="flag-btn" id="flag-s" data-tip="Dot-all">s</button>
+      <button class="flag-btn" id="flag-i" data-tip="Case-insensitive (i)">i</button>
+      <button class="flag-btn" id="flag-m" data-tip="Multiline (m)">m</button>
+      <button class="flag-btn" id="flag-s" data-tip="Dot-all (s)">s</button>
     </div>
-
-    <!-- Granularity -->
-    <select id="granularity-sel" class="tb-sel" data-tip="Match granularity">
-      <option value="span">per-span</option>
-      <option value="word">per-word</option>
+    <select id="granularity-sel" class="tb-sel">
+      <option value="span">per-word</option>
+      <option value="word">per-token</option>
     </select>
-
-    <button class="tb-btn primary" id="btn-apply-regex" data-tip="Apply regex (Ctrl+Enter)">Apply</button>
-
-    <div class="sep"></div>
-
-    <!-- Presets -->
-    <select id="preset-sel" class="tb-sel" data-tip="Load a saved preset">
-      <option value="">— preset —</option>
-    </select>
-    <button class="tb-btn" id="btn-save-preset" data-tip="Save current regex as preset">Save preset</button>
-
-    <div class="sep"></div>
-
-    <!-- Page nav -->
-    <div id="page-nav">
-      <button class="nav-btn" id="btn-prev" data-tip="Previous page (←)">&#8592;</button>
-      <input type="number" id="page-input" value="1" min="1" max="1">
-      <span id="page-total" style="color:var(--muted)">/1</span>
-      <button class="nav-btn" id="btn-next" data-tip="Next page (→)">&#8594;</button>
-    </div>
+    <button class="tb-btn accent" id="btn-select-regex" data-tip="Select all matches (Enter)">Select matches</button>
+    <button class="tb-btn" id="btn-save-preset" data-tip="Save this regex as a preset">+ Preset</button>
 
     <div class="sep"></div>
 
     <!-- Counters -->
     <div id="counters">
-      <span><span class="dot dot-keep"></span><span id="cnt-kept">0</span> kept</span>
-      <span><span class="dot dot-del"></span><span id="cnt-del">0</span> del</span>
-      <span><span class="dot dot-man"></span><span id="cnt-man">0</span> manual</span>
+      <span class="cnt-item keep"><span class="dot dot-keep"></span><span id="cnt-kept">0</span></span>
+      <span class="cnt-item del"><span class="dot dot-del"></span><span id="cnt-del">0</span></span>
     </div>
 
     <div class="sep"></div>
-
-    <button class="tb-btn" id="btn-reset-overrides" data-tip="Clear all manual overrides">Reset manual</button>
-    <button class="tb-btn primary" id="btn-save" data-tip="Save output PDF (Ctrl+S)">&#x1F4BE; Save</button>
+    <button class="tb-btn" id="btn-reset" data-tip="Reset all to drop">Reset all</button>
+    <button class="tb-btn accent" id="btn-save" data-tip="Save PDF (Ctrl+S)">💾 Save</button>
   </div>
 
   <!-- ── Workspace ─────────────────────────────────────────────────────────── -->
   <div id="workspace">
 
-    <!-- Thumbnail strip -->
-    <div id="thumbs">
-      <!-- populated by JS -->
+    <!-- Scroll container: all pages stacked -->
+    <div id="viewer-wrap">
+      <div id="pages-container">
+        <!-- page-block divs injected here by JS -->
+      </div>
+      <!-- Loading placeholder shown before session ready -->
+      <div id="preparing-msg">
+        <div class="spinner"></div>
+        <p>Flattening text &amp; rendering pages…</p>
+      </div>
     </div>
 
-    <!-- Page viewer -->
-    <div id="viewer-wrap">
-
-      <!-- Drop zone / landing screen -->
-      <div id="drop-overlay">
-        <div class="drop-zone" id="drop-zone">
-          <h2>Drop a PDF here</h2>
-          <p>or click to browse</p>
-          <input type="file" id="file-input" accept=".pdf" style="display:none">
-        </div>
-        <p style="color:var(--muted);font-size:11px">
-          Keyboard: ← → page nav &nbsp;|&nbsp; Ctrl+S save &nbsp;|&nbsp; Del=discard &nbsp;|&nbsp; Enter=keep &nbsp;|&nbsp; g jump-to-page
-        </p>
+    <!-- Right sidebar: regex presets -->
+    <div id="presets-panel">
+      <div class="presets-header">Presets</div>
+      <div id="presets-list">
+        <!-- preset items injected by JS -->
+        <p class="presets-empty">No presets yet.<br>Type a regex and click + Preset.</p>
       </div>
+    </div>
 
-      <!-- Page viewer (hidden until PDF loaded) -->
-      <div id="page-container" style="display:none">
-        <img id="page-img" alt="page" draggable="false">
-        <div id="spans-layer"></div>
-        <canvas id="sel-canvas"></canvas>
-      </div>
-
-    </div><!-- /viewer-wrap -->
   </div><!-- /workspace -->
 
   <!-- ── Status bar ─────────────────────────────────────────────────────────── -->
   <div id="statusbar">
-    <span id="status-msg">Ready — drop a PDF to begin</span>
+    <span id="status-msg">Ready</span>
     <span id="status-zoom" style="margin-left:auto">100%</span>
-    <span id="status-sel">no selection</span>
   </div>
 
-</div><!-- /app -->
+</div><!-- /editor-screen -->
 
-<!-- ── Preset save modal ─────────────────────────────────────────────────────── -->
-<div class="modal-backdrop hidden" id="preset-modal">
-  <div class="modal">
-    <h3>Save Regex Preset</h3>
-    <input type="text" id="preset-name-input" placeholder="Preset name…">
-    <div class="modal-btns">
-      <button class="tb-btn" id="btn-preset-cancel">Cancel</button>
-      <button class="tb-btn primary" id="btn-preset-confirm">Save</button>
-    </div>
-  </div>
+<!-- ══════════════════════════════════════════════════════════════════════════ -->
+<!--  FLOATING ACTION BAR  (shown when selection active)                      -->
+<!-- ══════════════════════════════════════════════════════════════════════════ -->
+<div id="action-bar" class="hidden">
+  <span id="sel-count">0 selected</span>
+  <button class="ab-btn add"   id="ab-add"   data-tip="Add to output (A)"><kbd>A</kbd> Add</button>
+  <button class="ab-btn drop"  id="ab-drop"  data-tip="Drop from output (D)"><kbd>D</kbd> Drop</button>
+  <button class="ab-btn merge" id="ab-merge" data-tip="Merge into one span (S)"><kbd>S</kbd> Merge</button>
+  <button class="ab-btn clear" id="ab-clear" data-tip="Clear selection (Esc)">✕</button>
 </div>
+
+<!-- Edit preview tooltip -->
+<div id="edit-preview" class="hidden"></div>
+
+<!-- Rubber-band overlay canvas (fixed, full-viewport) -->
+<canvas id="sel-canvas"></canvas>
 
 <script src="app.js"></script>
 </body>
