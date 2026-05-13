@@ -15,10 +15,10 @@ import pymupdf
 
 # ── Metadata lookup helpers ────────────────────────────────────────────────────
 
-def _build_meta_index(rawdict: dict) -> list[dict]:
-    """Collect all span metadata from a rawdict for spatial lookup."""
+def _build_meta_index(textdict: dict) -> list[dict]:
+    """Collect span metadata from a get_text('dict') result for spatial lookup."""
     meta: list[dict] = []
-    for block in rawdict.get("blocks", []):
+    for block in textdict.get("blocks", []):
         if block.get("type") != 0:
             continue
         for line in block.get("lines", []):
@@ -67,8 +67,8 @@ def extract_text(pdf_path: str | Path) -> dict:
     """Return per-page word-level items extracted from *pdf_path*.
 
     Words from ``page.get_text("words")`` are always the primary unit because
-    they are reliably populated regardless of PDF encoding.  Rawdict provides
-    font / size / color metadata where available.
+    they are reliably populated regardless of PDF encoding.  ``get_text("dict")``
+    (with flags=0 to avoid clipping) provides font / size / color metadata per span.
 
     Returns a dict keyed by str(page_index)::
 
@@ -100,9 +100,10 @@ def extract_text(pdf_path: str | Path) -> dict:
     for page_idx in range(len(doc)):
         page = doc[page_idx]
 
-        # Rawdict for metadata only — may be empty on some PDF types
-        rawdict = page.get_text("rawdict", flags=pymupdf.TEXTFLAGS_TEXT)
-        meta_index = _build_meta_index(rawdict)
+        # "dict" gives block/line/span structure with font+size+color metadata.
+        # flags=0 disables clipping/filtering that can silently drop spans.
+        textdict = page.get_text("dict", flags=0)
+        meta_index = _build_meta_index(textdict)
 
         # Words are the authoritative text source
         words = page.get_text("words")  # (x0,y0,x1,y1, text, block, line, word_no)
