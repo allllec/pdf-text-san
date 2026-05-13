@@ -365,7 +365,7 @@ def toggle_spans(session_id: str, req: ToggleRequest) -> JSONResponse:
     changes: dict[str, str] = {}
     for sid in req.span_ids:
         # Find page for this span to look up auto classification
-        pid = sid.split("_s")[0][1:]  # "p0_s3" → "0"
+        pid = sid.split("_")[0][1:]  # "p0_w3" → "0"
         auto = session.auto_cls.get(pid, {}).get(sid, "keep")
 
         if req.force is not None:
@@ -393,7 +393,7 @@ def edit_span(session_id: str, req: EditRequest) -> JSONResponse:
     if req.text:
         session.edited_texts[req.span_id] = req.text
         # Editing implies keep
-        pid = req.span_id.split("_s")[0][1:]
+        pid = req.span_id.split("_")[0][1:]
         auto = session.auto_cls.get(pid, {}).get(req.span_id, "keep")
         if auto != "keep":
             session.overrides[req.span_id] = "keep"
