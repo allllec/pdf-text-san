@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PDF Text Sanitiser</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="app">
+
+  <!-- ── Toolbar ──────────────────────────────────────────────────────────── -->
+  <div id="toolbar">
+    <span class="logo">PDF·SAN</span>
+    <div class="sep"></div>
+
+    <!-- Regex input -->
+    <input id="regex-input" type="text" placeholder="regex pattern…" spellcheck="false" autocomplete="off" data-tip="Enter regex; Ctrl+Enter to apply">
+
+    <!-- Regex flags -->
+    <div class="flag-group">
+      <button class="flag-btn" id="flag-i" data-tip="Case-insensitive">i</button>
+      <button class="flag-btn" id="flag-m" data-tip="Multiline">m</button>
+      <button class="flag-btn" id="flag-s" data-tip="Dot-all">s</button>
+    </div>
+
+    <!-- Granularity -->
+    <select id="granularity-sel" class="tb-sel" data-tip="Match granularity">
+      <option value="span">per-span</option>
+      <option value="word">per-word</option>
+    </select>
+
+    <button class="tb-btn primary" id="btn-apply-regex" data-tip="Apply regex (Ctrl+Enter)">Apply</button>
+
+    <div class="sep"></div>
+
+    <!-- Presets -->
+    <select id="preset-sel" class="tb-sel" data-tip="Load a saved preset">
+      <option value="">— preset —</option>
+    </select>
+    <button class="tb-btn" id="btn-save-preset" data-tip="Save current regex as preset">Save preset</button>
+
+    <div class="sep"></div>
+
+    <!-- Page nav -->
+    <div id="page-nav">
+      <button class="nav-btn" id="btn-prev" data-tip="Previous page (←)">&#8592;</button>
+      <input type="number" id="page-input" value="1" min="1" max="1">
+      <span id="page-total" style="color:var(--muted)">/1</span>
+      <button class="nav-btn" id="btn-next" data-tip="Next page (→)">&#8594;</button>
+    </div>
+
+    <div class="sep"></div>
+
+    <!-- Counters -->
+    <div id="counters">
+      <span><span class="dot dot-keep"></span><span id="cnt-kept">0</span> kept</span>
+      <span><span class="dot dot-del"></span><span id="cnt-del">0</span> del</span>
+      <span><span class="dot dot-man"></span><span id="cnt-man">0</span> manual</span>
+    </div>
+
+    <div class="sep"></div>
+
+    <button class="tb-btn" id="btn-reset-overrides" data-tip="Clear all manual overrides">Reset manual</button>
+    <button class="tb-btn primary" id="btn-save" data-tip="Save output PDF (Ctrl+S)">&#x1F4BE; Save</button>
+  </div>
+
+  <!-- ── Workspace ─────────────────────────────────────────────────────────── -->
+  <div id="workspace">
+
+    <!-- Thumbnail strip -->
+    <div id="thumbs">
+      <!-- populated by JS -->
+    </div>
+
+    <!-- Page viewer -->
+    <div id="viewer-wrap">
+
+      <!-- Drop zone / landing screen -->
+      <div id="drop-overlay">
+        <div class="drop-zone" id="drop-zone">
+          <h2>Drop a PDF here</h2>
+          <p>or click to browse</p>
+          <input type="file" id="file-input" accept=".pdf" style="display:none">
+        </div>
+        <p style="color:var(--muted);font-size:11px">
+          Keyboard: ← → page nav &nbsp;|&nbsp; Ctrl+S save &nbsp;|&nbsp; Del=discard &nbsp;|&nbsp; Enter=keep &nbsp;|&nbsp; g jump-to-page
+        </p>
+      </div>
+
+      <!-- Page viewer (hidden until PDF loaded) -->
+      <div id="page-container" style="display:none">
+        <img id="page-img" alt="page" draggable="false">
+        <div id="spans-layer"></div>
+        <canvas id="sel-canvas"></canvas>
+      </div>
+
+    </div><!-- /viewer-wrap -->
+  </div><!-- /workspace -->
+
+  <!-- ── Status bar ─────────────────────────────────────────────────────────── -->
+  <div id="statusbar">
+    <span id="status-msg">Ready — drop a PDF to begin</span>
+    <span id="status-zoom" style="margin-left:auto">100%</span>
+    <span id="status-sel">no selection</span>
+  </div>
+
+</div><!-- /app -->
+
+<!-- ── Preset save modal ─────────────────────────────────────────────────────── -->
+<div class="modal-backdrop hidden" id="preset-modal">
+  <div class="modal">
+    <h3>Save Regex Preset</h3>
+    <input type="text" id="preset-name-input" placeholder="Preset name…">
+    <div class="modal-btns">
+      <button class="tb-btn" id="btn-preset-cancel">Cancel</button>
+      <button class="tb-btn primary" id="btn-preset-confirm">Save</button>
+    </div>
+  </div>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>
