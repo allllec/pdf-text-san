@@ -56,14 +56,42 @@ uv pip install -r requirements.txt
 
 ## Running the Application
 
-1. **Start the FastAPI server:**
-   ```bash
-   python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
-   ```
+### Easiest (recommended)
 
-2. **Access the UI:** Open `http://localhost:8000` in your web browser.
+```bash
+python start.py
+```
 
-3. **Sanitize:** Drag and drop a PDF into the browser to begin processing.
+Then open `http://127.0.0.1:8000`.
+
+### Equivalent standard entrypoint
+
+```bash
+python -m app
+```
+
+### Optional run flags
+
+Both commands support:
+
+```bash
+python start.py --host 0.0.0.0 --port 8000 --reload
+python -m app --host 0.0.0.0 --port 8000 --reload
+```
+
+To disable reload:
+
+```bash
+python start.py --no-reload
+```
+
+### Legacy uvicorn command (still works)
+
+```bash
+python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
+```
+
+After the server is running, drag and drop a PDF into the browser to begin processing.
 
 ---
 

@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import copy
+import json
 import re
 import shutil
 import uuid
@@ -104,19 +106,28 @@ class SessionState:
         self._merge_counter = 0
 
         self.edited_texts: dict[str, str] = {}
-        self._undo: list[dict[str, str]] = []
+        self._undo: list[dict[str, Any]] = []
 
     # ── Undo ──────────────────────────────────────────────────────────────────
 
     def push_undo(self) -> None:
-        self._undo.append(dict(self.state))
+        self._undo.append({
+            "state": dict(self.state),
+            "edited_texts": dict(self.edited_texts),
+            "custom_spans": copy.deepcopy(self.custom_spans),
+            "merge_counter": self._merge_counter,
+        })
         if len(self._undo) > 100:
             self._undo.pop(0)
 
     def undo(self) -> bool:
         if not self._undo:
             return False
-        self.state = self._undo.pop()
+        snapshot = self._undo.pop()
+        self.state = snapshot["state"]
+        self.edited_texts = snapshot["edited_texts"]
+        self.custom_spans = snapshot["custom_spans"]
+        self._merge_counter = snapshot["merge_counter"]
         return True
 
     # ── Paths ─────────────────────────────────────────────────────────────────
@@ -224,6 +235,13 @@ class EditRequest(BaseModel):
 class MergeRequest(BaseModel):
     span_ids: list[str]
 
+class SplitRequest(BaseModel):
+    span_ids: list[str]
+    pattern: str
+    case_insensitive: bool = False
+    multiline: bool = False
+    dotall: bool = False
+
 class SavePresetRequest(BaseModel):
     name: str
     patterns: list[str]
@@ -254,6 +272,116 @@ def _find_span(session: SessionState, sid: str) -> dict | None:
     page = session.pages_data.get(pid, {})
     span = next((s for s in page.get("spans", []) if s["id"] == sid), None)
     return span or session.custom_spans.get(sid)
+
+
+def _active_span_ids(session: SessionState) -> list[str]:
+    return [sid for sid, st in session.state.items() if st != "hidden"]
+
+
+def _replacement_to_python_template(replace: str) -> str:
+    """Translate JS-style replacement tokens to Python-compatible template.
+
+    Supported tokens:
+      $$  -> literal $
+      $&  -> whole match
+      $1  -> capture group 1
+      ${name} -> named capture group
+    """
+    marker = "\x00"
+    out = replace.replace("$$", marker)
+    out = out.replace("$&", r"\g<0>")
+    out = re.sub(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}", r"\\g<\1>", out)
+    out = re.sub(r"\$(\d+)", r"\\g<\1>", out)
+    return out.replace(marker, "$")
+
+
+def _split_span_by_pattern(span: dict, pattern: re.Pattern) -> list[dict[str, Any]]:
+    """Return ordered parts with text and whether each part matched the regex."""
+    text = span["text"]
+    parts: list[dict[str, Any]] = []
+    last_end = 0
+    for m in pattern.finditer(text):
+        start, end = m.span()
+        if start > last_end:
+            parts.append({"text": text[last_end:start], "is_match": False, "start": last_end, "end": start})
+        parts.append({"text": text[start:end], "is_match": True, "start": start, "end": end})
+        last_end = end
+    if last_end < len(text):
+        parts.append({"text": text[last_end:], "is_match": False, "start": last_end, "end": len(text)})
+    return parts
+
+
+def _split_spans_with_regex(
+    session: SessionState,
+    span_ids: list[str],
+    pattern: re.Pattern,
+) -> tuple[list[dict], list[str]]:
+    """Split matching spans into before/match/after pieces, preserving status."""
+    new_spans: list[dict] = []
+    removed_ids: list[str] = []
+
+    for sid in span_ids:
+        if session.state.get(sid, "delete") == "hidden":
+            continue
+        span = _find_span(session, sid)
+        if not span:
+            continue
+
+        src_text = session.edited_texts.get(sid, span["text"])
+        parts = _split_span_by_pattern({**span, "text": src_text}, pattern)
+        if len(parts) <= 1 or not any(p["is_match"] for p in parts):
+            continue
+
+        parent_state = session.state.get(sid, "delete")
+        bbox = span.get("bbox", [0, 0, 0, 0])
+        x0, y0, x1, y1 = bbox
+        total_chars = max(len(src_text), 1)
+        total_width = max(float(x1) - float(x0), 0.0)
+        origin_y = span.get("origin", [x0, y1])[1]
+
+        removed_ids.append(sid)
+        session.state[sid] = "hidden"
+        session.edited_texts.pop(sid, None)
+
+        for i, part in enumerate(parts):
+            part_text = part["text"]
+            if not part_text.strip():
+                continue
+
+            start = part["start"]
+            end = part["end"]
+            part_x0 = x0 + total_width * (start / total_chars)
+            part_x1 = x0 + total_width * (end / total_chars)
+            if part_x1 <= part_x0:
+                continue
+
+            new_id = f"{sid}_s{i}"
+            new_span = {
+                "id": new_id,
+                "text": part_text,
+                "bbox": [part_x0, y0, part_x1, y1],
+                "origin": [part_x0, origin_y],
+                "font": span.get("font", ""),
+                "size": span.get("size", 12),
+                "color": span.get("color", 0),
+                "dir": span.get("dir", [1, 0]),
+                "flags": span.get("flags", 0),
+                "ascender": span.get("ascender", 0.8),
+                "descender": span.get("descender", -0.2),
+            }
+            session.custom_spans[new_id] = new_span
+            session.state[new_id] = parent_state
+
+            new_spans.append({
+                "id": new_id,
+                "text": part_text,
+                "bbox": new_span["bbox"],
+                "size": new_span["size"],
+                "state": parent_state,
+                "page": int(sid.split("_")[0][1:]),
+            })
+
+    return new_spans, removed_ids
 
 
 # ── Upload ─────────────────────────────────────────────────────────────────────
@@ -360,11 +488,14 @@ def apply_regex(session_id: str, req: RegexRequest) -> JSONResponse:
 
     for pid, page in session.pages_data.items():
         for span in page["spans"]:
+            if session.state.get(span["id"], "delete") == "hidden":
+                continue
             if classify_span(span, compiled, req.granularity) == "keep":
                 matched.append(span["id"])
 
-    prefix_map: dict[str, dict] = {}
     for sid, span in session.custom_spans.items():
+        if session.state.get(sid, "delete") == "hidden":
+            continue
         if classify_span(span, compiled, req.granularity) == "keep":
             matched.append(sid)
 
@@ -382,41 +513,30 @@ def find_replace(session_id: str, req: FindReplaceRequest) -> JSONResponse:
 
     changes: dict[str, str] = {}
     session.push_undo()
+    replace_template = _replacement_to_python_template(req.replace)
 
-    def perform_substitution(m):
-        """Safe substitution that handles optional groups as empty strings."""
-        res = req.replace
-        # Replace $$ with a placeholder to avoid mangling literal dollars
-        res = res.replace("$$", "\x01")
-        
-        # Function to resolve $1, $2 etc
-        def resolve_group(match_obj):
-            g_idx = int(match_obj.group(1))
-            try:
-                return m.group(g_idx) or ""
-            except (IndexError, TypeError):
-                return ""
-        
-        res = re.sub(r"\$(\d+)", resolve_group, res)
-        return res.replace("\x01", "$")
-
-    # Iterate over ALL spans that haven't been superseded (not hidden)
-    all_active_ids = [sid for sid, state in session.state.items() if state != "hidden"]
-    
-    for sid in all_active_ids:
+    for sid in _active_span_ids(session):
         span = _find_span(session, sid)
-        if not span: continue
-        
-        orig_text = session.edited_texts.get(sid, span["text"])
-        if pattern.search(orig_text):
-            try:
-                new_text = pattern.sub(perform_substitution, orig_text)
-                if new_text != orig_text:
-                    session.edited_texts[sid] = new_text
-                    # Approval is NOT linked to find-replace
-                    changes[sid] = new_text
-            except Exception:
-                continue
+        if not span:
+            continue
+
+        src_text = session.edited_texts.get(sid, span["text"])
+        if not pattern.search(src_text):
+            continue
+
+        try:
+            new_text = pattern.sub(lambda m: m.expand(replace_template), src_text)
+        except re.error as exc:
+            raise HTTPException(422, f"Invalid replacement: {exc}")
+
+        if new_text == src_text:
+            continue
+
+        if new_text == span["text"]:
+            session.edited_texts.pop(sid, None)
+        else:
+            session.edited_texts[sid] = new_text
+        changes[sid] = new_text
 
     return JSONResponse({"ok": True, "changes": changes, "counters": session.counters()})
 
@@ -430,74 +550,16 @@ def regex_split(session_id: str, req: RegexSplitRequest) -> JSONResponse:
     except re.error as exc:
         raise HTTPException(422, f"Invalid regex: {exc}")
 
-    from .classifier import split_span_by_regex
-    new_spans = []
-    removed_ids = []
-
     session.push_undo()
+    matched_ids: list[str] = []
+    for sid in _active_span_ids(session):
+        span = _find_span(session, sid)
+        if not span:
+            continue
+        if pattern.search(session.edited_texts.get(sid, span["text"])):
+            matched_ids.append(sid)
 
-    # We need a font object to measure text width for splitting
-    # For now we'll use a generic fallback if we can't find the font
-    doc = pymupdf.open(session.input_path)
-
-    for pid, page_data in session.pages_data.items():
-        page_idx = int(pid)
-        page_spans = page_data["spans"]
-        
-        for span in list(page_spans):
-            if pattern.search(span["text"]):
-                parts = split_span_by_regex(span, pattern)
-                if len(parts) <= 1: continue
-
-                removed_ids.append(span["id"])
-                session.state[span["id"]] = "hidden"
-
-                # Calculate bboxes for parts
-                x_offset = span["bbox"][0]
-                # Try to get font metrics
-                font_name = span.get("font", "helv")
-                font_size = span.get("size", 12)
-                
-                # Simple width estimation if font not found
-                for i, part in enumerate(parts):
-                    # Skip pure whitespace spans to reduce noise
-                    if not part["text"].strip():
-                        # Still need to increment offset for spacing
-                        width = len(part["text"]) * font_size * 0.5
-                        x_offset += width
-                        continue
-
-                    width = len(part["text"]) * font_size * 0.5 
-                    
-                    new_id = f"{span['id']}_s{i}"
-                    new_s = {
-                        "id":        new_id,
-                        "text":      part["text"],
-                        "bbox":      [x_offset, span["bbox"][1], x_offset + width, span["bbox"][3]],
-                        "origin":    [x_offset, span["origin"][1]],
-                        "font":      span.get("font", ""),
-                        "size":      font_size,
-                        "color":     span.get("color", 0),
-                        "dir":       span.get("dir", [1, 0]),
-                        "flags":     0,
-                        "ascender":  span.get("ascender", 0.8),
-                        "descender": span.get("descender", -0.2),
-                    }
-                    session.custom_spans[new_id] = new_s
-                    # NON-matching parts inherit 'delete' (effectively dropping them)
-                    session.state[new_id] = "keep" if part["is_match"] else "delete"
-                    x_offset += width
-                    
-                    new_spans.append({
-                        "id":    new_id,
-                        "text":  new_s["text"],
-                        "bbox":  new_s["bbox"],
-                        "size":  new_s["size"],
-                        "state": session.state[new_id],
-                        "page":  page_idx
-                    })
-
-    doc.close()
+    new_spans, removed_ids = _split_spans_with_regex(session, matched_ids, pattern)
     return JSONResponse({
         "ok": True, 
         "new_spans": new_spans, 
@@ -507,62 +569,20 @@ def regex_split(session_id: str, req: RegexSplitRequest) -> JSONResponse:
 
 
 @app.post("/api/{session_id}/split")
-def split_selected(session_id: str, req: MergeRequest) -> JSONResponse:
-    """Split selected spans into tokens (words)."""
+def split_selected(session_id: str, req: SplitRequest) -> JSONResponse:
+    """Split selected spans by regex into before/match/after parts."""
     session = _get_session(session_id)
-    new_spans = []
-    removed_ids = []
+    if not req.pattern.strip():
+        raise HTTPException(400, "Split requires a regex pattern")
+
+    flags = build_flags(req.case_insensitive, req.multiline, req.dotall)
+    try:
+        pattern = re.compile(req.pattern, flags)
+    except re.error as exc:
+        raise HTTPException(422, f"Invalid regex: {exc}")
 
     session.push_undo()
-    doc = pymupdf.open(session.input_path)
-
-    for sid in req.span_ids:
-        span = _find_span(session, sid)
-        if not span: continue
-
-        removed_ids.append(sid)
-        session.state[sid] = "hidden"
-
-        # Split by whitespace into tokens
-        tokens = span["text"].split()
-        if len(tokens) <= 1:
-            # If it can't be split further, just keep it but it's technically already a token
-            # Actually we just revert its state to hidden and put it back as a token if it was one
-            pass
-
-        x_offset = span["bbox"][0]
-        font_size = span.get("size", 12)
-
-        for i, token in enumerate(tokens):
-            width = len(token) * font_size * 0.5
-            new_id = f"{sid}_t{i}"
-            new_s = {
-                "id":        new_id,
-                "text":      token,
-                "bbox":      [x_offset, span["bbox"][1], x_offset + width, span["bbox"][3]],
-                "origin":    [x_offset, span["origin"][1]],
-                "font":      span.get("font", ""),
-                "size":      font_size,
-                "color":     span.get("color", 0),
-                "dir":       span.get("dir", [1, 0]),
-                "flags":     0,
-                "ascender":  span.get("ascender", 0.8),
-                "descender": span.get("descender", -0.2),
-            }
-            session.custom_spans[new_id] = new_s
-            session.state[new_id] = "keep"
-            x_offset += width + (font_size * 0.3) # add space estimation
-
-            new_spans.append({
-                "id":    new_id,
-                "text":  new_s["text"],
-                "bbox":  new_s["bbox"],
-                "size":  new_s["size"],
-                "state": "keep",
-                "page":  int(sid.split("_")[0][1:])
-            })
-
-    doc.close()
+    new_spans, removed_ids = _split_spans_with_regex(session, req.span_ids, pattern)
     return JSONResponse({"ok": True, "new_spans": new_spans, "removed_ids": removed_ids, "counters": session.counters()})
 
 
@@ -586,7 +606,6 @@ def edit_span(session_id: str, req: EditRequest) -> JSONResponse:
     session.push_undo()
     if req.text:
         session.edited_texts[req.span_id] = req.text
-        session.state[req.span_id] = "keep"   # editing implies keep
     else:
         session.edited_texts.pop(req.span_id, None)
     return JSONResponse({"ok": True})
@@ -606,6 +625,12 @@ def merge_spans(session_id: str, req: MergeRequest) -> JSONResponse:
 
     if not spans:
         raise HTTPException(400, "No valid spans found")
+
+    statuses = {session.state.get(sid, "delete") for sid in req.span_ids if session.state.get(sid) != "hidden"}
+    statuses.discard("hidden")
+    if len(statuses) > 1:
+        raise HTTPException(400, "Selected spans have mixed status. Apply A or D first, then merge.")
+    inherited_state = next(iter(statuses), "delete")
 
     # Warn if spans appear far apart (more than 3× the average height apart)
     avg_h = sum(s["bbox"][3] - s["bbox"][1] for s in spans) / len(spans)
@@ -647,7 +672,7 @@ def merge_spans(session_id: str, req: MergeRequest) -> JSONResponse:
     for sid in req.span_ids:
         session.state[sid] = "hidden"  # Hide superseded spans
     session.custom_spans[new_id] = new_span
-    session.state[new_id] = "keep"
+    session.state[new_id] = inherited_state
 
     return JSONResponse({
         "ok":          True,
@@ -657,7 +682,7 @@ def merge_spans(session_id: str, req: MergeRequest) -> JSONResponse:
             "bbox":        [x0, y0, x1, y1],
             "size":        avg_size,
             "dir":         new_span["dir"],
-            "state":       "keep",
+            "state":       inherited_state,
             "merged":      True,
             "page":        int(pid),
             "edited_text": None,
