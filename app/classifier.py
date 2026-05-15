@@ -65,6 +65,25 @@ def classify_span(span: dict, patterns: list[re.Pattern], granularity: str = "sp
     return "keep" if _matches_any(span["text"], patterns) else "delete"
 
 
+def split_span_by_regex(span: dict, pattern: re.Pattern) -> list[dict]:
+    """Split a span's text into multiple parts based on regex matches.
+    Returns a list of 'part' dicts, each with 'text' and 'is_match'.
+    The coordinates (bbox) for these parts aren't calculated here (requires font metrics).
+    """
+    text = span["text"]
+    parts = []
+    last_end = 0
+    for match in pattern.finditer(text):
+        start, end = match.span()
+        if start > last_end:
+            parts.append({"text": text[last_end:start], "is_match": False})
+        parts.append({"text": text[start:end], "is_match": True})
+        last_end = end
+    if last_end < len(text):
+        parts.append({"text": text[last_end:], "is_match": False})
+    return parts
+
+
 def apply_classification(
     pages_data: dict,
     patterns: list[str],

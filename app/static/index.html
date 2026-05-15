@@ -48,6 +48,7 @@
       <button class="flag-btn" id="flag-i" data-tip="Case-insensitive (i)">i</button>
       <button class="flag-btn" id="flag-m" data-tip="Multiline (m)">m</button>
       <button class="flag-btn" id="flag-s" data-tip="Dot-all (s)">s</button>
+      <button class="flag-btn" id="flag-split" data-tip="Split spans by match">Split</button>
     </div>
     <select id="granularity-sel" class="tb-sel">
       <option value="span">per-word</option>
@@ -91,6 +92,17 @@
         <!-- preset items injected by JS -->
         <p class="presets-empty">No presets yet.<br>Type a regex and click + Preset.</p>
       </div>
+
+      <div class="presets-header" style="margin-top:20px">Find & Replace</div>
+      <div id="find-replace-panel">
+        <input id="find-input" type="text" placeholder="find regex..." class="regex-input" style="width:100%; margin-bottom:5px">
+        <input id="replace-input" type="text" placeholder="replace with $1..." class="regex-input" style="width:100%; margin-bottom:5px">
+        <div style="display:flex; gap:5px">
+          <button class="tb-btn accent" id="btn-replace-all" style="flex:1">Replace All</button>
+          <button class="tb-btn" id="btn-save-fr" title="Save this find/replace">+</button>
+        </div>
+        <div id="fr-list" style="margin-top:10px"></div>
+      </div>
     </div>
 
   </div><!-- /workspace -->
@@ -119,6 +131,14 @@
 
 <!-- Rubber-band overlay canvas (fixed, full-viewport) -->
 <canvas id="sel-canvas"></canvas>
+
+<!-- Modal Editor -->
+<div id="modal-editor-wrap" class="hidden">
+  <div id="modal-editor-box">
+    <textarea id="modal-editor-input" spellcheck="false"></textarea>
+    <div class="modal-editor-tip">Enter to save, Esc to cancel</div>
+  </div>
+</div>
 
 <script src="app.js"></script>
 </body>

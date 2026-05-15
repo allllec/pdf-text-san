@@ -333,3 +333,88 @@ html, body {
   font-size: 11px; padding: 3px 8px; border-radius: 3px; white-space: nowrap;
   pointer-events: none; z-index: 400;
 }
+
+/* Find & Replace panel */
+#find-replace-panel {
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+}
+
+#fr-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.fr-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px;
+  border-radius: 4px;
+  background: var(--surface2);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.fr-item:hover {
+  background: var(--border);
+}
+
+.fr-item .fr-text {
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--muted);
+}
+
+.fr-item b { color: var(--text); }
+
+/* Modal Editor */
+#modal-editor-wrap {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.6);
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+#modal-editor-box {
+  background: var(--surface);
+  border: 1px solid var(--accent);
+  border-radius: 8px;
+  width: 90%;
+  max-width: 800px;
+  padding: 20px;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.8);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+#modal-editor-input {
+  width: 100%;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 4px;
+  padding: 12px;
+  font: 18pt 'Consolas', monospace;
+  resize: vertical;
+  min-height: 80px;
+  outline: none;
+}
+
+#modal-editor-input:focus {
+  border-color: var(--accent);
+}
+
+.modal-editor-tip {
+  color: var(--muted);
+  font-size: 11px;
+  text-align: right;
+}

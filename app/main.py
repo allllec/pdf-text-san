@@ -158,6 +158,18 @@ class RegexRequest(BaseModel):
     multiline: bool = False
     dotall: bool = False
     granularity: str = "span"
+    split_matches: bool = False
+
+class RegexSplitRequest(BaseModel):
+    pattern: str
+    case_insensitive: bool = False
+    multiline: bool = False
+    dotall: bool = False
+
+class FindReplaceRequest(BaseModel):
+    find: str
+    replace: str
+    case_insensitive: bool = False
 
 class StateRequest(BaseModel):
     span_ids: list[str]
@@ -315,6 +327,115 @@ def apply_regex(session_id: str, req: RegexRequest) -> JSONResponse:
             matched.append(sid)
 
     return JSONResponse({"matched_ids": matched, "total_matched": len(matched)})
+
+
+@app.post("/api/{session_id}/find-replace")
+def find_replace(session_id: str, req: FindReplaceRequest) -> JSONResponse:
+    session = _get_session(session_id)
+    flags = re.IGNORECASE if req.case_insensitive else 0
+    try:
+        pattern = re.compile(req.find, flags)
+    except re.error as exc:
+        raise HTTPException(422, f"Invalid find regex: {exc}")
+
+    changes: dict[str, str] = {}
+    session.push_undo()
+
+    # Iterate over all spans currently marked as "keep"
+    # and all custom spans
+    all_target_ids = [sid for sid, state in session.state.items() if state == "keep"]
+    
+    for sid in all_target_ids:
+        span = _find_span(session, sid)
+        if not span: continue
+        
+        orig_text = session.edited_texts.get(sid, span["text"])
+        if pattern.search(orig_text):
+            new_text = pattern.sub(req.replace, orig_text)
+            if new_text != orig_text:
+                session.edited_texts[sid] = new_text
+                changes[sid] = new_text
+
+    return JSONResponse({"ok": True, "changes": changes, "counters": session.counters()})
+
+
+@app.post("/api/{session_id}/regex-split")
+def regex_split(session_id: str, req: RegexSplitRequest) -> JSONResponse:
+    session = _get_session(session_id)
+    flags = build_flags(req.case_insensitive, req.multiline, req.dotall)
+    try:
+        pattern = re.compile(req.pattern, flags)
+    except re.error as exc:
+        raise HTTPException(422, f"Invalid regex: {exc}")
+
+    from .classifier import split_span_by_regex
+    new_spans = []
+    removed_ids = []
+
+    session.push_undo()
+
+    # We need a font object to measure text width for splitting
+    # For now we'll use a generic fallback if we can't find the font
+    doc = pymupdf.open(session.input_path)
+
+    for pid, page_data in session.pages_data.items():
+        page_idx = int(pid)
+        page_spans = page_data["spans"]
+        
+        for span in list(page_spans):
+            if pattern.search(span["text"]):
+                parts = split_span_by_regex(span, pattern)
+                if len(parts) <= 1: continue
+
+                removed_ids.append(span["id"])
+                session.state[span["id"]] = "delete"
+
+                # Calculate bboxes for parts
+                x_offset = span["bbox"][0]
+                # Try to get font metrics
+                font_name = span.get("font", "helv")
+                font_size = span.get("size", 12)
+                
+                # Simple width estimation if font not found
+                # In a real app we'd load the actual font from the PDF
+                for i, part in enumerate(parts):
+                    # Estimate width (very rough fallback)
+                    width = len(part["text"]) * font_size * 0.5 
+                    
+                    new_id = f"{span['id']}_s{i}"
+                    new_s = {
+                        "id":        new_id,
+                        "text":      part["text"],
+                        "bbox":      [x_offset, span["bbox"][1], x_offset + width, span["bbox"][3]],
+                        "origin":    [x_offset, span["origin"][1]],
+                        "font":      span.get("font", ""),
+                        "size":      font_size,
+                        "color":     span.get("color", 0),
+                        "dir":       span.get("dir", [1, 0]),
+                        "flags":     0,
+                        "ascender":  span.get("ascender", 0.8),
+                        "descender": span.get("descender", -0.2),
+                    }
+                    session.custom_spans[new_id] = new_s
+                    session.state[new_id] = "keep" if part["is_match"] else "delete"
+                    x_offset += width
+                    
+                    new_spans.append({
+                        "id":    new_id,
+                        "text":  new_s["text"],
+                        "bbox":  new_s["bbox"],
+                        "size":  new_s["size"],
+                        "state": session.state[new_id],
+                        "page":  page_idx
+                    })
+
+    doc.close()
+    return JSONResponse({
+        "ok": True, 
+        "new_spans": new_spans, 
+        "removed_ids": removed_ids,
+        "counters": session.counters()
+    })
 
 
 # ── State mutations ────────────────────────────────────────────────────────────

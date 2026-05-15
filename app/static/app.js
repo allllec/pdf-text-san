@@ -27,10 +27,13 @@ const S = {
   // regex
   pattern: '',
   flagI: false, flagM: false, flagS: false,
+  flagSplit: false,
   granularity: 'span',
 
   // presets list (from server)
   presets: {},
+  // saved find/replace list
+  frPresets: [],
 
   // zoom
   zoom: DEFAULT_ZOOM,
@@ -366,8 +369,6 @@ function hideEditPreview() { $('edit-preview').classList.add('hidden'); }
 
 function onSpanClick(e, sid) {
   if (S.drag && (Math.abs(S.drag.curX - S.drag.startX) > 4 || Math.abs(S.drag.curY - S.drag.startY) > 4)) return;
-  if (S.editingId && S.editingId !== sid) commitEdit();
-  if (S.editingId === sid) return;
   startEdit(sid);
 }
 
@@ -380,34 +381,21 @@ function startEdit(sid) {
   const sp      = pd?.spans.get(sid);
   const curText = S.editedTexts.get(sid) ?? (sp?.text || '');
 
-  div.classList.add('editing');
-  div.innerHTML = '';
-
-  const ta = el('textarea');
-  ta.value = curText;
-  ta.style.fontSize = Math.max(7, (sp?.size || 10) * S.zoom * 0.85) + 'px';
-  div.appendChild(ta);
-  ta.focus(); ta.select();
-
-  ta.addEventListener('keydown', evt => {
-    if (evt.key === 'Enter' && !evt.shiftKey) { evt.preventDefault(); commitEdit(); }
-    if (evt.key === 'Escape') { cancelEdit(); }
-    evt.stopPropagation();
-  });
-  ta.addEventListener('blur', () => { if (S.editingId === sid) commitEdit(); });
+  $('modal-editor-wrap').classList.remove('hidden');
+  const input = $('modal-editor-input');
+  input.value = curText;
+  input.focus();
+  input.select();
 }
 
 async function commitEdit() {
   const sid = S.editingId;
   if (!sid) return;
-  const div = $(`sb-${sid}`);
-  const ta  = div?.querySelector('textarea');
-  const newText = ta?.value ?? '';
+  const newText = $('modal-editor-input').value;
   S.editingId = null;
+  $('modal-editor-wrap').classList.add('hidden');
 
-  div?.classList.remove('editing');
-  if (div) div.innerHTML = '';
-
+  const div = $(`sb-${sid}`);
   if (newText.trim()) {
     S.editedTexts.set(sid, newText);
     S.spanState.set(sid, 'keep');
@@ -422,11 +410,18 @@ async function commitEdit() {
 }
 
 function cancelEdit() {
-  const sid = S.editingId;
   S.editingId = null;
-  const div = $(`sb-${sid}`);
-  if (div) { div.classList.remove('editing'); div.innerHTML = ''; refreshSpanClass(div, sid); }
+  $('modal-editor-wrap').classList.add('hidden');
 }
+
+$('modal-editor-wrap').addEventListener('mousedown', e => {
+  if (e.target === $('modal-editor-wrap')) cancelEdit();
+});
+
+$('modal-editor-input').addEventListener('keydown', e => {
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); commitEdit(); }
+  if (e.key === 'Escape') { cancelEdit(); }
+});
 
 // ── Rubber-band drag selection ────────────────────────────────────────────────
 
@@ -610,6 +605,28 @@ async function applyMerge() {
 async function applyRegex() {
   const pattern = $('regex-input').value.trim();
   if (!pattern || !S.sessionId) return;
+  
+  if (S.flagSplit) {
+    setStatus('Splitting matches…');
+    try {
+      const result = await api('POST', `/api/${S.sessionId}/regex-split`, {
+        pattern: pattern,
+        case_insensitive: S.flagI,
+        multiline: S.flagM,
+        dotall: S.flagS,
+      });
+      // Refresh local data with new spans
+      await loadAllSpans();
+      buildPageBlocks();
+      setupImageLazyLoad();
+      updateCounters();
+      setStatus(`Split complete: ${result.new_spans.length} new spans created`);
+    } catch (e) {
+      setStatus(`Split error: ${e.message}`);
+    }
+    return;
+  }
+
   setStatus('Selecting matches…');
   try {
     const result = await api('POST', `/api/${S.sessionId}/regex`, {
@@ -633,7 +650,7 @@ $('btn-select-regex').addEventListener('click', applyRegex);
 let regexDebounce = null;
 $('regex-input').addEventListener('input', () => {
   clearTimeout(regexDebounce);
-  regexDebounce = setTimeout(() => { if (S.sessionId && $('regex-input').value.trim()) applyRegex(); }, 700);
+  regexDebounce = setTimeout(() => { if (S.sessionId && $('regex-input').value.trim() && !S.flagSplit) applyRegex(); }, 700);
 });
 
 // Flag toggles
@@ -641,11 +658,74 @@ function updateFlags() {
   $('flag-i').classList.toggle('active', S.flagI);
   $('flag-m').classList.toggle('active', S.flagM);
   $('flag-s').classList.toggle('active', S.flagS);
+  $('flag-split').classList.toggle('active', S.flagSplit);
 }
 $('flag-i').addEventListener('click', () => { S.flagI = !S.flagI; updateFlags(); });
 $('flag-m').addEventListener('click', () => { S.flagM = !S.flagM; updateFlags(); });
 $('flag-s').addEventListener('click', () => { S.flagS = !S.flagS; updateFlags(); });
+$('flag-split').addEventListener('click', () => { S.flagSplit = !S.flagSplit; updateFlags(); });
 $('granularity-sel').addEventListener('change', e => { S.granularity = e.target.value; });
+
+// ── Find & Replace ────────────────────────────────────────────────────────────
+
+async function applyReplaceAll() {
+  const find = $('find-input').value.trim();
+  const replace = $('replace-input').value;
+  if (!find || !S.sessionId) return;
+
+  setStatus('Replacing all…');
+  try {
+    const result = await api('POST', `/api/${S.sessionId}/find-replace`, {
+      find, replace,
+      case_insensitive: S.flagI,
+    });
+    // Update local edited texts
+    for (const [sid, newText] of Object.entries(result.changes)) {
+        S.editedTexts.set(sid, newText);
+        S.spanState.set(sid, 'keep');
+    }
+    await loadAllSpans(); // Easier to just reload everything to get new states
+    buildPageBlocks();
+    setupImageLazyLoad();
+    updateCounters();
+    setStatus(`Replaced in ${Object.keys(result.changes).length} spans`);
+  } catch (e) {
+    setStatus(`Replace error: ${e.message}`);
+  }
+}
+
+$('btn-replace-all').addEventListener('click', applyReplaceAll);
+
+function renderFrPresets() {
+    const list = $('fr-list');
+    list.innerHTML = '';
+    S.frPresets.forEach((p, idx) => {
+        const item = el('div', 'fr-item');
+        const text = el('div', 'fr-text');
+        text.innerHTML = `<b>${p.find}</b> → ${p.replace}`;
+        item.append(text);
+        item.addEventListener('click', () => {
+            $('find-input').value = p.find;
+            $('replace-input').value = p.replace;
+        });
+        list.appendChild(item);
+    });
+}
+
+$('btn-save-fr').addEventListener('click', () => {
+    const find = $('find-input').value.trim();
+    const replace = $('replace-input').value;
+    if (!find) return;
+    S.frPresets.push({ find, replace });
+    localStorage.setItem('pdfsan_fr_presets', JSON.stringify(S.frPresets));
+    renderFrPresets();
+});
+
+// Load FR presets from localStorage
+const savedFr = localStorage.getItem('pdfsan_fr_presets');
+if (savedFr) {
+    try { S.frPresets = JSON.parse(savedFr); renderFrPresets(); } catch(e) {}
+}
 
 // ── Presets sidebar ───────────────────────────────────────────────────────────
 
