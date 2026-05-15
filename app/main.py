@@ -581,8 +581,18 @@ def find_replace(session_id: str, req: FindReplaceRequest) -> JSONResponse:
         if not span:
             continue
 
-        src_text = session.edited_texts.get(sid, span["text"])
-        if not pattern.search(src_text):
+        orig_text = span["text"]
+        current_text = session.edited_texts.get(sid, orig_text)
+
+        # Prefer the original text when it matches so that running find-replace
+        # multiple times is idempotent (avoids accumulating stale suffixes).
+        # Fall back to the edited text only when the original doesn't match,
+        # which allows intentional chained replacements to work.
+        if pattern.search(orig_text):
+            src_text = orig_text
+        elif pattern.search(current_text):
+            src_text = current_text
+        else:
             continue
 
         try:
