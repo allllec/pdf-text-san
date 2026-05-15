@@ -33,7 +33,8 @@ _SESSIONS_DIR.mkdir(exist_ok=True)
 
 _executor     = ThreadPoolExecutor(max_workers=4)
 _sessions: dict[str, "SessionState"] = {}
-_preset_store = PresetStore(_PRESETS_DIR)
+_regex_presets = PresetStore(_PRESETS_DIR, "regex_presets.json")
+_fr_presets    = PresetStore(_PRESETS_DIR, "fr_presets.json")
 
 
 # ── Session state ──────────────────────────────────────────────────────────────
@@ -604,11 +605,11 @@ def download(session_id: str) -> FileResponse:
 
 @app.get("/api/presets")
 def list_presets() -> JSONResponse:
-    return JSONResponse(_preset_store.all())
+    return JSONResponse(_regex_presets.all())
 
 @app.post("/api/presets")
 def save_preset(req: SavePresetRequest) -> JSONResponse:
-    _preset_store.save(req.name, {
+    _regex_presets.save(req.name, {
         "patterns": req.patterns, "case_insensitive": req.case_insensitive,
         "multiline": req.multiline, "dotall": req.dotall, "granularity": req.granularity,
     })
@@ -616,7 +617,29 @@ def save_preset(req: SavePresetRequest) -> JSONResponse:
 
 @app.delete("/api/presets/{name}")
 def delete_preset(name: str) -> JSONResponse:
-    if not _preset_store.delete(name):
+    if not _regex_presets.delete(name):
+        raise HTTPException(404, "Preset not found")
+    return JSONResponse({"ok": True})
+
+# ── Find & Replace Presets ─────────────────────────────────────────────────────
+
+class SaveFRPresetRequest(BaseModel):
+    find: str
+    replace: str
+
+@app.get("/api/presets-fr")
+def list_fr_presets() -> JSONResponse:
+    return JSONResponse(_fr_presets.all())
+
+@app.post("/api/presets-fr")
+def save_fr_preset(req: SaveFRPresetRequest) -> JSONResponse:
+    # Use find as the key for now, or we could ask for a name
+    _fr_presets.save(req.find, {"find": req.find, "replace": req.replace})
+    return JSONResponse({"ok": True})
+
+@app.delete("/api/presets-fr/{find}")
+def delete_fr_preset(find: str) -> JSONResponse:
+    if not _fr_presets.delete(find):
         raise HTTPException(404, "Preset not found")
     return JSONResponse({"ok": True})
 

@@ -111,12 +111,12 @@ def apply_classification(
 # ── Preset persistence ─────────────────────────────────────────────────────────
 
 class PresetStore:
-    """Simple JSON-backed named regex preset store."""
+    """Simple JSON-backed named preset store."""
 
-    def __init__(self, directory: str | Path) -> None:
+    def __init__(self, directory: str | Path, filename: str = "presets.json") -> None:
         self._dir = Path(directory)
         self._dir.mkdir(parents=True, exist_ok=True)
-        self._path = self._dir / "presets.json"
+        self._path = self._dir / filename
         self._data: dict[str, Any] = self._load()
 
     def _load(self) -> dict:

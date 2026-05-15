@@ -734,14 +734,28 @@ async function applyReplaceAll() {
 
 $('btn-replace-all').addEventListener('click', applyReplaceAll);
 
+async function loadFrPresets() {
+    try { S.frPresets = Object.values(await api('GET', '/api/presets-fr')); } catch { S.frPresets = []; }
+    renderFrPresets();
+}
+
 function renderFrPresets() {
     const list = $('fr-list');
     list.innerHTML = '';
-    S.frPresets.forEach((p, idx) => {
+    S.frPresets.forEach((p) => {
         const item = el('div', 'fr-item');
         const text = el('div', 'fr-text');
         text.innerHTML = `<b>${p.find}</b> → ${p.replace}`;
         item.append(text);
+
+        const del = el('button', 'preset-del'); del.textContent = '×';
+        del.addEventListener('click', async (e) => {
+            e.stopPropagation();
+            await api('DELETE', `/api/presets-fr/${encodeURIComponent(p.find)}`);
+            await loadFrPresets();
+        });
+
+        item.append(del);
         item.addEventListener('click', () => {
             $('find-input').value = p.find;
             $('replace-input').value = p.replace;
@@ -750,20 +764,13 @@ function renderFrPresets() {
     });
 }
 
-$('btn-save-fr').addEventListener('click', () => {
+$('btn-save-fr').addEventListener('click', async () => {
     const find = $('find-input').value.trim();
     const replace = $('replace-input').value;
     if (!find) return;
-    S.frPresets.push({ find, replace });
-    localStorage.setItem('pdfsan_fr_presets', JSON.stringify(S.frPresets));
-    renderFrPresets();
+    await api('POST', '/api/presets-fr', { find, replace });
+    await loadFrPresets();
 });
-
-// Load FR presets from localStorage
-const savedFr = localStorage.getItem('pdfsan_fr_presets');
-if (savedFr) {
-    try { S.frPresets = JSON.parse(savedFr); renderFrPresets(); } catch(e) {}
-}
 
 // ── Presets sidebar ───────────────────────────────────────────────────────────
 
@@ -901,4 +908,5 @@ document.addEventListener('keydown', async e => {
 // ── Init ──────────────────────────────────────────────────────────────────────
 
 loadPresets();
+loadFrPresets();
 showHome();
