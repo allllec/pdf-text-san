@@ -380,12 +380,25 @@ def find_replace(session_id: str, req: FindReplaceRequest) -> JSONResponse:
     except re.error as exc:
         raise HTTPException(422, f"Invalid find regex: {exc}")
 
-    # Convert JS-style $1 references to Python-style \g<1>
-    # This handles $1, $2... and also avoids issues with literal $
-    py_replace = re.sub(r"\$(\d+)", r"\\g<\1>", req.replace)
-
     changes: dict[str, str] = {}
     session.push_undo()
+
+    def perform_substitution(m):
+        """Safe substitution that handles optional groups as empty strings."""
+        res = req.replace
+        # Replace $$ with a placeholder to avoid mangling literal dollars
+        res = res.replace("$$", "\x01")
+        
+        # Function to resolve $1, $2 etc
+        def resolve_group(match_obj):
+            g_idx = int(match_obj.group(1))
+            try:
+                return m.group(g_idx) or ""
+            except (IndexError, TypeError):
+                return ""
+        
+        res = re.sub(r"\$(\d+)", resolve_group, res)
+        return res.replace("\x01", "$")
 
     # Iterate over ALL spans that haven't been superseded (not hidden)
     all_active_ids = [sid for sid, state in session.state.items() if state != "hidden"]
@@ -397,13 +410,12 @@ def find_replace(session_id: str, req: FindReplaceRequest) -> JSONResponse:
         orig_text = session.edited_texts.get(sid, span["text"])
         if pattern.search(orig_text):
             try:
-                new_text = pattern.sub(py_replace, orig_text)
+                new_text = pattern.sub(perform_substitution, orig_text)
                 if new_text != orig_text:
                     session.edited_texts[sid] = new_text
-                    session.state[sid] = "keep"  # Auto-keep if we edited it
+                    # Approval is NOT linked to find-replace
                     changes[sid] = new_text
-            except re.error as e:
-                # Catch replacement errors (e.g. invalid group references)
+            except Exception:
                 continue
 
     return JSONResponse({"ok": True, "changes": changes, "counters": session.counters()})
