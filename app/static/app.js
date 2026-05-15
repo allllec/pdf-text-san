@@ -27,7 +27,6 @@ const S = {
   // regex
   pattern: '',
   flagI: false, flagM: false, flagS: false,
-  flagSplit: true,
   granularity: 'span',
 
   // presets list (from server)
@@ -644,27 +643,6 @@ async function applyRegex() {
   const pattern = $('regex-input').value.trim();
   if (!pattern || !S.sessionId) return;
   
-  if (S.flagSplit) {
-    setStatus('Splitting matches…');
-    try {
-      const result = await api('POST', `/api/${S.sessionId}/regex-split`, {
-        pattern: pattern,
-        case_insensitive: S.flagI,
-        multiline: S.flagM,
-        dotall: S.flagS,
-      });
-      // Refresh local data with new spans
-      await loadAllSpans();
-      buildPageBlocks();
-      setupImageLazyLoad();
-      updateCounters();
-      setStatus(`Split complete: ${result.new_spans.length} new spans created`);
-    } catch (e) {
-      setStatus(`Split error: ${e.message}`);
-    }
-    return;
-  }
-
   setStatus('Selecting matches…');
   try {
     const result = await api('POST', `/api/${S.sessionId}/regex`, {
@@ -683,12 +661,36 @@ async function applyRegex() {
   }
 }
 
+async function applySplitRegex() {
+  const pattern = $('regex-input').value.trim();
+  if (!pattern || !S.sessionId) return;
+  
+  setStatus('Splitting matches…');
+  try {
+    const result = await api('POST', `/api/${S.sessionId}/regex-split`, {
+      pattern: pattern,
+      case_insensitive: S.flagI,
+      multiline: S.flagM,
+      dotall: S.flagS,
+    });
+    // Refresh local data with new spans
+    await loadAllSpans();
+    buildPageBlocks();
+    setupImageLazyLoad();
+    updateCounters();
+    setStatus(`Split complete: ${result.new_spans.length} new spans created`);
+  } catch (e) {
+    setStatus(`Split error: ${e.message}`);
+  }
+}
+
 $('btn-select-regex').addEventListener('click', applyRegex);
+if ($('btn-split-regex')) $('btn-split-regex').addEventListener('click', applySplitRegex);
 
 let regexDebounce = null;
 $('regex-input').addEventListener('input', () => {
   clearTimeout(regexDebounce);
-  regexDebounce = setTimeout(() => { if (S.sessionId && $('regex-input').value.trim() && !S.flagSplit) applyRegex(); }, 700);
+  regexDebounce = setTimeout(() => { if (S.sessionId && $('regex-input').value.trim()) applyRegex(); }, 700);
 });
 
 // Flag toggles
@@ -696,13 +698,10 @@ function updateFlags() {
   $('flag-i').classList.toggle('active', S.flagI);
   $('flag-m').classList.toggle('active', S.flagM);
   $('flag-s').classList.toggle('active', S.flagS);
-  $('flag-split').classList.toggle('active', S.flagSplit);
 }
 $('flag-i').addEventListener('click', () => { S.flagI = !S.flagI; updateFlags(); });
 $('flag-m').addEventListener('click', () => { S.flagM = !S.flagM; updateFlags(); });
 $('flag-s').addEventListener('click', () => { S.flagS = !S.flagS; updateFlags(); });
-$('flag-split').addEventListener('click', () => { S.flagSplit = !S.flagSplit; updateFlags(); });
-$('granularity-sel').addEventListener('change', e => { S.granularity = e.target.value; });
 
 // ── Find & Replace ────────────────────────────────────────────────────────────
 
@@ -819,7 +818,6 @@ function applyPreset(name, preset, itemEl) {
   S.flagS = !!preset.dotall;
   S.granularity = preset.granularity || 'span';
   updateFlags();
-  $('granularity-sel').value = S.granularity;
   if (S.sessionId) applyRegex();
 }
 
