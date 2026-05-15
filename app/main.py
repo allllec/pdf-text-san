@@ -380,23 +380,31 @@ def find_replace(session_id: str, req: FindReplaceRequest) -> JSONResponse:
     except re.error as exc:
         raise HTTPException(422, f"Invalid find regex: {exc}")
 
+    # Convert JS-style $1 references to Python-style \g<1>
+    # This handles $1, $2... and also avoids issues with literal $
+    py_replace = re.sub(r"\$(\d+)", r"\\g<\1>", req.replace)
+
     changes: dict[str, str] = {}
     session.push_undo()
 
-    # Iterate over all spans currently marked as "keep"
-    # and all custom spans
-    all_target_ids = [sid for sid, state in session.state.items() if state == "keep"]
+    # Iterate over ALL spans that haven't been superseded (not hidden)
+    all_active_ids = [sid for sid, state in session.state.items() if state != "hidden"]
     
-    for sid in all_target_ids:
+    for sid in all_active_ids:
         span = _find_span(session, sid)
         if not span: continue
         
         orig_text = session.edited_texts.get(sid, span["text"])
         if pattern.search(orig_text):
-            new_text = pattern.sub(req.replace, orig_text)
-            if new_text != orig_text:
-                session.edited_texts[sid] = new_text
-                changes[sid] = new_text
+            try:
+                new_text = pattern.sub(py_replace, orig_text)
+                if new_text != orig_text:
+                    session.edited_texts[sid] = new_text
+                    session.state[sid] = "keep"  # Auto-keep if we edited it
+                    changes[sid] = new_text
+            except re.error as e:
+                # Catch replacement errors (e.g. invalid group references)
+                continue
 
     return JSONResponse({"ok": True, "changes": changes, "counters": session.counters()})
 
