@@ -444,6 +444,7 @@ html, body {
 .review-list {
   flex: 1;
   overflow-y: auto;
+  min-height: 0; /* Important: allow flex child to be smaller than its content */
   padding: 6px;
   display: flex;
   flex-direction: column;
@@ -454,6 +455,7 @@ html, body {
 .review-list::-webkit-scrollbar-thumb { background: var(--border); }
 
 .review-item {
+  flex-shrink: 0; /* Prevent items from squashing */
   padding: 6px 8px;
   font-size: 13px;
   line-height: 1.2;
@@ -474,3 +476,11 @@ html, body {
 
 /* Hide dropped spans from visual layer to prevent ghosting */
 .span-box.delete { display: none !important; }
+
+/* Force show for scrolling to dropped items */
+.span-box.force-show {
+  display: block !important;
+  z-index: 100 !important;
+  background: rgba(232, 56, 56, 0.4) !important;
+  border-color: #e83838 !important;
+}

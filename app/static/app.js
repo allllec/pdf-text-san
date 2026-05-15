@@ -385,10 +385,17 @@ function renderReviewPanel() {
 function scrollToSpan(sid, pageIdx) {
   const div = $(`sb-${sid}`);
   if (!div) return;
+
+  const isHidden = S.spanState.get(sid) === 'delete';
+  if (isHidden) div.classList.add('force-show');
+
   div.scrollIntoView({ behavior: 'smooth', block: 'center' });
   // Brief flash effect
   div.style.outline = '4px solid #f5c800';
-  setTimeout(() => div.style.outline = '', 1000);
+  setTimeout(() => {
+    div.style.outline = '';
+    if (isHidden) div.classList.remove('force-show');
+  }, 2000);
 }
 
 // ── Edit preview tooltip ──────────────────────────────────────────────────────
@@ -676,6 +683,10 @@ async function applySplitRegex() {
       multiline: S.flagM,
       dotall: S.flagS,
     });
+    // Clear selection after split to avoid 'blue' ghost boxes
+    S.selected.clear();
+    hideActionBar();
+
     // Refresh local data with new spans
     await loadAllSpans();
     buildPageBlocks();

@@ -102,6 +102,9 @@ class SessionState:
             page_idx = int(pid)
             spans_out = []
             for s in page["spans"]:
+                # Skip pure whitespace spans from the UI entirely
+                if not s["text"].strip():
+                    continue
                 sid = s["id"]
                 spans_out.append({
                     "id":          sid,
