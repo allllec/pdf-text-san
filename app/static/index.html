@@ -50,10 +50,6 @@
       <button class="flag-btn" id="flag-s" data-tip="Dot-all (s)">s</button>
       <button class="flag-btn" id="flag-split" data-tip="Split spans by match">Split</button>
     </div>
-    <select id="granularity-sel" class="tb-sel">
-      <option value="span">per-word</option>
-      <option value="word">per-token</option>
-    </select>
     <button class="tb-btn accent" id="btn-select-regex" data-tip="Select all matches (Enter)">Select matches</button>
     <button class="tb-btn" id="btn-save-preset" data-tip="Save this regex as a preset">+ Preset</button>
 
@@ -72,6 +68,14 @@
 
   <!-- ── Workspace ─────────────────────────────────────────────────────────── -->
   <div id="workspace">
+
+    <!-- Left sidebar: Review Panel -->
+    <div id="review-panel">
+      <div class="review-header">To Keep</div>
+      <div id="keep-list" class="review-list"></div>
+      <div class="review-header">To Drop</div>
+      <div id="drop-list" class="review-list"></div>
+    </div>
 
     <!-- Scroll container: all pages stacked -->
     <div id="viewer-wrap">

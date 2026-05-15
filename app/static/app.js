@@ -27,7 +27,7 @@ const S = {
   // regex
   pattern: '',
   flagI: false, flagM: false, flagS: false,
-  flagSplit: false,
+  flagSplit: true,
   granularity: 'span',
 
   // presets list (from server)
@@ -349,6 +349,44 @@ function updateCounters() {
   S.spanState.forEach(v => { if (v === 'keep') kept++; else del++; });
   $('cnt-kept').textContent = kept;
   $('cnt-del').textContent  = del;
+  renderReviewPanel();
+}
+
+function renderReviewPanel() {
+  const keepList = $('keep-list');
+  const dropList = $('drop-list');
+  keepList.innerHTML = '';
+  dropList.innerHTML = '';
+
+  const allSpans = [];
+  S.pages.forEach((pd, pageIdx) => {
+    pd.spans.forEach((sp, sid) => {
+      allSpans.push({ ...sp, pageIdx, state: S.spanState.get(sid) });
+    });
+  });
+
+  // Sort by page then top-to-bottom
+  allSpans.sort((a, b) => a.pageIdx - b.pageIdx || a.bbox[1] - b.bbox[1]);
+
+  allSpans.forEach(sp => {
+    const item = el('div', 'review-item');
+    const text = S.editedTexts.get(sp.id) || sp.text;
+    item.textContent = (text.trim() || '—');
+    item.title = `Page ${sp.pageIdx + 1}: ${text}`;
+    item.addEventListener('click', () => scrollToSpan(sp.id, sp.pageIdx));
+    
+    if (sp.state === 'keep') keepList.appendChild(item);
+    else dropList.appendChild(item);
+  });
+}
+
+function scrollToSpan(sid, pageIdx) {
+  const div = $(`sb-${sid}`);
+  if (!div) return;
+  div.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  // Brief flash effect
+  div.style.outline = '4px solid #f5c800';
+  setTimeout(() => div.style.outline = '', 1000);
 }
 
 // ── Edit preview tooltip ──────────────────────────────────────────────────────
