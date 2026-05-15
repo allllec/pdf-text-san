@@ -360,7 +360,11 @@ function renderReviewPanel() {
   const allSpans = [];
   S.pages.forEach((pd, pageIdx) => {
     pd.spans.forEach((sp, sid) => {
-      allSpans.push({ ...sp, pageIdx, state: S.spanState.get(sid) });
+      // Skip pure whitespace spans to declutter the review list
+      const text = (S.editedTexts.get(sid) || sp.text).trim();
+      if (!text) return;
+
+      allSpans.push({ ...sp, pageIdx, state: S.spanState.get(sid), displayText: text });
     });
   });
 
@@ -369,9 +373,8 @@ function renderReviewPanel() {
 
   allSpans.forEach(sp => {
     const item = el('div', 'review-item');
-    const text = S.editedTexts.get(sp.id) || sp.text;
-    item.textContent = (text.trim() || '—');
-    item.title = `Page ${sp.pageIdx + 1}: ${text}`;
+    item.textContent = sp.displayText;
+    item.title = `Page ${sp.pageIdx + 1}: ${sp.displayText}`;
     item.addEventListener('click', () => scrollToSpan(sp.id, sp.pageIdx));
     
     if (sp.state === 'keep') keepList.appendChild(item);

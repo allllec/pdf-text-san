@@ -399,9 +399,14 @@ def regex_split(session_id: str, req: RegexSplitRequest) -> JSONResponse:
                 font_size = span.get("size", 12)
                 
                 # Simple width estimation if font not found
-                # In a real app we'd load the actual font from the PDF
                 for i, part in enumerate(parts):
-                    # Estimate width (very rough fallback)
+                    # Skip pure whitespace spans to reduce noise
+                    if not part["text"].strip():
+                        # Still need to increment offset for spacing
+                        width = len(part["text"]) * font_size * 0.5
+                        x_offset += width
+                        continue
+
                     width = len(part["text"]) * font_size * 0.5 
                     
                     new_id = f"{span['id']}_s{i}"
@@ -419,6 +424,7 @@ def regex_split(session_id: str, req: RegexSplitRequest) -> JSONResponse:
                         "descender": span.get("descender", -0.2),
                     }
                     session.custom_spans[new_id] = new_s
+                    # NON-matching parts inherit 'delete' (effectively dropping them)
                     session.state[new_id] = "keep" if part["is_match"] else "delete"
                     x_offset += width
                     
