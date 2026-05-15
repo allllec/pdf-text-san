@@ -824,6 +824,8 @@ async function applyReplaceAll() {
       find,
       replace,
       case_insensitive: S.flagI,
+      multiline: S.flagM,
+      dotall: S.flagS,
     });
     // Update local edited texts
     for (const [sid, newText] of Object.entries(result.changes)) {

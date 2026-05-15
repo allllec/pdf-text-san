@@ -224,6 +224,8 @@ class FindReplaceRequest(BaseModel):
     find: str
     replace: str
     case_insensitive: bool = False
+    multiline: bool = False
+    dotall: bool = False
 
 class StateRequest(BaseModel):
     span_ids: list[str]
@@ -294,6 +296,51 @@ def _replacement_to_python_template(replace: str) -> str:
     out = re.sub(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}", r"\\g<\1>", out)
     out = re.sub(r"\$(\d+)", r"\\g<\1>", out)
     return out.replace(marker, "$")
+
+
+def _parse_regex_literal(expr: str) -> tuple[str, int] | None:
+    """Parse JS-like /pattern/flags input into (pattern, flags).
+
+    Returns None when the input is not slash-delimited regex literal syntax.
+    """
+    if len(expr) < 2 or not expr.startswith("/"):
+        return None
+
+    # Find the last unescaped slash to split /pattern/flags.
+    end = -1
+    i = len(expr) - 1
+    while i > 0:
+        if expr[i] == "/":
+            backslashes = 0
+            j = i - 1
+            while j >= 0 and expr[j] == "\\":
+                backslashes += 1
+                j -= 1
+            if backslashes % 2 == 0:
+                end = i
+                break
+        i -= 1
+
+    if end <= 0:
+        return None
+
+    pattern = expr[1:end]
+    flags_text = expr[end + 1 :]
+    if not flags_text:
+        return (pattern, 0)
+
+    flags = 0
+    valid = set("ims")
+    for ch in flags_text:
+        if ch not in valid:
+            raise HTTPException(422, f"Invalid regex literal flag: '{ch}'")
+        if ch == "i":
+            flags |= re.IGNORECASE
+        elif ch == "m":
+            flags |= re.MULTILINE
+        elif ch == "s":
+            flags |= re.DOTALL
+    return (pattern, flags)
 
 
 def _split_span_by_pattern(span: dict, pattern: re.Pattern) -> list[dict[str, Any]]:
@@ -506,9 +553,22 @@ def apply_regex(session_id: str, req: RegexRequest) -> JSONResponse:
 @app.post("/api/{session_id}/find-replace")
 def find_replace(session_id: str, req: FindReplaceRequest) -> JSONResponse:
     session = _get_session(session_id)
-    flags = re.IGNORECASE if req.case_insensitive else 0
+    base_flags = build_flags(req.case_insensitive, req.multiline, req.dotall)
+
+    find_expr = req.find.strip()
+    if not find_expr:
+        raise HTTPException(422, "Find regex cannot be empty")
+
+    literal = _parse_regex_literal(find_expr)
+    if literal is None:
+        pattern_text = find_expr
+        flags = base_flags
+    else:
+        pattern_text, literal_flags = literal
+        flags = base_flags | literal_flags
+
     try:
-        pattern = re.compile(req.find, flags)
+        pattern = re.compile(pattern_text, flags)
     except re.error as exc:
         raise HTTPException(422, f"Invalid find regex: {exc}")
 
