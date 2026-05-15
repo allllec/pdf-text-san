@@ -474,8 +474,11 @@ html, body {
 #keep-list .review-item { color: #32d85a; }
 #drop-list .review-item { color: #e83838; opacity: 1; }
 
-/* Hide dropped spans from visual layer to prevent ghosting */
-.span-box.delete { display: none !important; }
+/* Hide superseded spans completely (split/merged originals) */
+.span-box.hidden { display: none !important; }
+
+/* Show dropped spans normally (red) */
+.span-box.delete { display: block; background: var(--del-bg); border-color: var(--del-bd); }
 
 /* Force show for scrolling to dropped items */
 .span-box.force-show {

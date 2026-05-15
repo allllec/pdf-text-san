@@ -37,6 +37,40 @@ _regex_presets = PresetStore(_PRESETS_DIR, "regex_presets.json")
 _fr_presets    = PresetStore(_PRESETS_DIR, "fr_presets.json")
 
 
+def _discover_sessions():
+    """Scan sessions directory and rebuild SessionState objects for existing work."""
+    if not _SESSIONS_DIR.exists():
+        return
+    for sdir in _SESSIONS_DIR.iterdir():
+        if not sdir.is_dir(): continue
+        # Basic validation that it's a valid session folder
+        spans_path = sdir / "spans.json"
+        orig_path  = sdir / "original.pdf"
+        if not spans_path.exists() or not orig_path.exists():
+            continue
+
+        try:
+            with open(spans_path, "r") as f:
+                pages_data = json.load(f)
+            
+            session_id = sdir.name
+            outlined_path = sdir / "outlined.pdf"
+            # We don't know the original filename easily unless we saved it, 
+            # for now we'll use the folder name or 'recovered_document.pdf'
+            filename = "recovered_document.pdf"
+            
+            session = SessionState(session_id, sdir, orig_path, outlined_path, pages_data, filename)
+            # If the outlined file and pages exist, mark as ready
+            if outlined_path.exists() and (sdir / "pages").exists():
+                session.ready = True
+            
+            _sessions[session_id] = session
+        except Exception as e:
+            print(f"Failed to recover session {sdir.name}: {e}")
+
+_discover_sessions()
+
+
 # ── Session state ──────────────────────────────────────────────────────────────
 
 class SessionState:
@@ -102,30 +136,33 @@ class SessionState:
             page_idx = int(pid)
             spans_out = []
             for s in page["spans"]:
-                # Skip pure whitespace spans from the UI entirely
-                if not s["text"].strip():
-                    continue
+                if not s["text"].strip(): continue
                 sid = s["id"]
+                state = self.state.get(sid, "delete")
+                if state == "hidden": continue # Skip spans that were split/merged
+                
                 spans_out.append({
                     "id":          sid,
                     "text":        s["text"],
                     "bbox":        s["bbox"],
                     "size":        s.get("size", 12),
                     "dir":         s.get("dir", [1, 0]),
-                    "state":       self.state.get(sid, "delete"),
+                    "state":       state,
                     "edited_text": self.edited_texts.get(sid),
                 })
-            # Custom spans belonging to this page
+            # Custom spans
             prefix = f"p{page_idx}_"
             for sid, span in self.custom_spans.items():
                 if sid.startswith(prefix):
+                    state = self.state.get(sid, "delete")
+                    if state == "hidden": continue
                     spans_out.append({
                         "id":          sid,
                         "text":        span["text"],
                         "bbox":        span["bbox"],
                         "size":        span.get("size", 12),
                         "dir":         span.get("dir", [1, 0]),
-                        "state":       self.state.get(sid, "delete"),
+                        "state":       state,
                         "edited_text": self.edited_texts.get(sid),
                         "merged":      True,
                     })
@@ -393,7 +430,7 @@ def regex_split(session_id: str, req: RegexSplitRequest) -> JSONResponse:
                 if len(parts) <= 1: continue
 
                 removed_ids.append(span["id"])
-                session.state[span["id"]] = "delete"
+                session.state[span["id"]] = "hidden"
 
                 # Calculate bboxes for parts
                 x_offset = span["bbox"][0]
@@ -447,6 +484,66 @@ def regex_split(session_id: str, req: RegexSplitRequest) -> JSONResponse:
         "removed_ids": removed_ids,
         "counters": session.counters()
     })
+
+
+@app.post("/api/{session_id}/split")
+def split_selected(session_id: str, req: MergeRequest) -> JSONResponse:
+    """Split selected spans into tokens (words)."""
+    session = _get_session(session_id)
+    new_spans = []
+    removed_ids = []
+
+    session.push_undo()
+    doc = pymupdf.open(session.input_path)
+
+    for sid in req.span_ids:
+        span = _find_span(session, sid)
+        if not span: continue
+
+        removed_ids.append(sid)
+        session.state[sid] = "hidden"
+
+        # Split by whitespace into tokens
+        tokens = span["text"].split()
+        if len(tokens) <= 1:
+            # If it can't be split further, just keep it but it's technically already a token
+            # Actually we just revert its state to hidden and put it back as a token if it was one
+            pass
+
+        x_offset = span["bbox"][0]
+        font_size = span.get("size", 12)
+
+        for i, token in enumerate(tokens):
+            width = len(token) * font_size * 0.5
+            new_id = f"{sid}_t{i}"
+            new_s = {
+                "id":        new_id,
+                "text":      token,
+                "bbox":      [x_offset, span["bbox"][1], x_offset + width, span["bbox"][3]],
+                "origin":    [x_offset, span["origin"][1]],
+                "font":      span.get("font", ""),
+                "size":      font_size,
+                "color":     span.get("color", 0),
+                "dir":       span.get("dir", [1, 0]),
+                "flags":     0,
+                "ascender":  span.get("ascender", 0.8),
+                "descender": span.get("descender", -0.2),
+            }
+            session.custom_spans[new_id] = new_s
+            session.state[new_id] = "keep"
+            x_offset += width + (font_size * 0.3) # add space estimation
+
+            new_spans.append({
+                "id":    new_id,
+                "text":  new_s["text"],
+                "bbox":  new_s["bbox"],
+                "size":  new_s["size"],
+                "state": "keep",
+                "page":  int(sid.split("_")[0][1:])
+            })
+
+    doc.close()
+    return JSONResponse({"ok": True, "new_spans": new_spans, "removed_ids": removed_ids, "counters": session.counters()})
 
 
 # ── State mutations ────────────────────────────────────────────────────────────
@@ -528,7 +625,7 @@ def merge_spans(session_id: str, req: MergeRequest) -> JSONResponse:
 
     session.push_undo()
     for sid in req.span_ids:
-        session.state[sid] = "delete"
+        session.state[sid] = "hidden"  # Hide superseded spans
     session.custom_spans[new_id] = new_span
     session.state[new_id] = "keep"
 

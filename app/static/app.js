@@ -598,6 +598,7 @@ function hideActionBar() { $('action-bar').classList.add('hidden'); }
 // Action bar buttons
 $('ab-add').addEventListener('click',   () => applyAction('keep'));
 $('ab-drop').addEventListener('click',  () => applyAction('delete'));
+$('ab-split').addEventListener('click', () => applySplit());
 $('ab-merge').addEventListener('click', () => applyMerge());
 $('ab-clear').addEventListener('click', () => clearSelection());
 
@@ -609,6 +610,24 @@ async function applyAction(action) {
   clearSelection();
   updateCounters();
   await api('POST', `/api/${S.sessionId}/state`, { span_ids: ids, action });
+}
+
+async function applySplit() {
+  if (!S.selected.size) return;
+  const ids = [...S.selected];
+  setStatus('Splitting selected spans…');
+  try {
+    const result = await api('POST', `/api/${S.sessionId}/split`, { span_ids: ids });
+    S.selected.clear();
+    hideActionBar();
+    await loadAllSpans();
+    buildPageBlocks();
+    setupImageLazyLoad();
+    updateCounters();
+    setStatus(`Split complete: ${result.new_spans.length} new tokens created`);
+  } catch (e) {
+    setStatus(`Split failed: ${e.message}`);
+  }
 }
 
 async function applyMerge() {
@@ -913,8 +932,9 @@ document.addEventListener('keydown', async e => {
   if (!S.sessionId) return;
 
   if (e.key === 'a' || e.key === 'A') { await applyAction('keep');   return; }
+  if (e.key === 's' || e.key === 'S') { await applySplit();          return; }
   if (e.key === 'd' || e.key === 'D') { await applyAction('delete'); return; }
-  if (e.key === 's' || e.key === 'S') { await applyMerge();          return; }
+  if (e.key === 'm' || e.key === 'M') { await applyMerge();          return; }
 });
 
 // ── Init ──────────────────────────────────────────────────────────────────────
