@@ -23,41 +23,47 @@ This application allows you to ingest a PDF, flatten its visible text into vecto
 
 ---
 
-## Installation
+## Setup & Installation
 
-### Prerequisites
+### 1. Prerequisites (Ghostscript)
+The `gs` command must be available in your system `PATH`.
 
-- **Python 3.11+**
-- **Ghostscript:** The `gs` command must be in your `PATH`.
-  - **macOS:** `brew install ghostscript`
-  - **Linux:** `sudo apt install ghostscript`
-  - **Windows:** Download from [ghostscript.com](https://www.ghostscript.com/releases/) and ensure `gswin64c.exe` is renamed to `gs` or added to your PATH.
+- **macOS (Homebrew):** `brew install ghostscript`
+- **Linux (apt):** `sudo apt install ghostscript`
+- **Windows (winget):** `winget install ArtifexSoftware.Ghostscript`
 
-### Setup
+### 2. Installation
+Clone the repository and choose your preferred package manager:
 
-1. Clone the repository:
-   ```bash
-   git clone https://github.com/your-username/pdf-text-sanitizer.git
-   cd pdf-text-sanitizer
-   ```
+```bash
+git clone https://github.com/your-username/pdf-text-sanitizer.git
+cd pdf-text-sanitizer
+```
 
-2. Create a virtual environment and install dependencies:
-   ```bash
-   python3 -m venv venv
-   source venv/bin/activate  # On Windows: venv\Scripts\activate
-   pip install -r requirements.txt
-   ```
+#### Option A: Using pip
+```bash
+python3 -m venv venv
+source venv/bin/activate  # On Windows: venv\Scripts\activate
+pip install -r requirements.txt
+```
 
-## Usage
+#### Option B: Using [uv](https://github.com/astral-sh/uv) (Recommended)
+```bash
+uv venv
+source .venv/bin/activate # On Windows: .venv\Scripts\activate
+uv pip install -r requirements.txt
+```
 
-1. Start the FastAPI server:
+## Running the Application
+
+1. **Start the FastAPI server:**
    ```bash
    python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
    ```
 
-2. Open your browser and go to `http://localhost:8000`.
+2. **Access the UI:** Open `http://localhost:8000` in your web browser.
 
-3. Drag and drop your PDF to begin the sanitization process.
+3. **Sanitize:** Drag and drop a PDF into the browser to begin processing.
 
 ---
 
