@@ -70,8 +70,6 @@ def _discover_sessions():
         except Exception as e:
             print(f"Failed to recover session {sdir.name}: {e}")
 
-_discover_sessions()
-
 
 # ── Session state ──────────────────────────────────────────────────────────────
 
@@ -188,6 +186,9 @@ class SessionState:
         kept = sum(1 for v in self.state.values() if v == "keep")
         total = len(self.state)
         return {"total": total, "kept": kept, "deleted": total - kept}
+
+
+_discover_sessions()
 
 
 # ── Background preparation ─────────────────────────────────────────────────────
